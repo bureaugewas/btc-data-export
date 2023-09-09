@@ -5,6 +5,9 @@ import asyncio
 import asyncssh
 import paramiko
 import pandas as pd
+from azure.storage.blob import BlobServiceClient, BlobClient, ContainerClient
+
+connection_string = config.connection_string
 
 # Try to connect to local bitcoin node
 try:
@@ -54,9 +57,51 @@ def get_block_data(i):
         print('excepted')
     return block_data
 
+# TODO: move azure utils to seperate file
+def upload_file_to_blob(container_name, blob_name, file_path):
+
+    # Create a BlobServiceClient using the connection string
+    blob_service_client = BlobServiceClient.from_connection_string(connection_string)
+
+    # Get a reference to the container
+    container_client = blob_service_client.get_container_client(container_name)
+
+    # Create a BlobClient for the file you want to upload
+    blob_client = container_client.get_blob_client(blob_name)
+
+    # Upload the file to Azure Blob Storage
+    with open(file_path, "rb") as data:
+        blob_client.upload_blob(data)
+
+    print(f"File {blob_name} uploaded to {container_name} container.")
+
+
+# TODO: move azure utils to seperate file
+def blob_exists(container_name, blob_name):
+    try:
+        blob_service_client = BlobServiceClient.from_connection_string(connection_string)
+        container_client = blob_service_client.get_container_client(container_name)
+
+        # List blobs in the container
+        blob_list = container_client.list_blobs()
+
+        # Check if the desired blob name exists in the list of blob names
+        for blob in blob_list:
+            if blob.name == blob_name:
+                return True
+
+        # If the loop completes and the blob is not found, return False
+        return False
+
+    except Exception as e:
+        print(f"Error checking blob existence: {e}")
+        return False
+
 
 # Save block data as is in json format
 def save_block_data_json(i, block_data, output_dir):
+    reupload = False
+
     # Define the file path for the JSON file
     file_path = os.path.join(output_dir, f'{i}_block.json')
 
@@ -64,9 +109,15 @@ def save_block_data_json(i, block_data, output_dir):
         # Save the block_data to the JSON file
         with open(file_path, 'w') as json_file:
             json.dump(block_data, json_file)
-        print(f"Saved block {i} data to {file_path}")
+        #print(f"Saved block {i} data to {file_path}")
     except Exception as e:
         print(f"Error saving block {i} data: {e}")
+
+    # Prevent file from being reuploaded
+    if reupload == False and blob_exists('btc-block-data',f'json/{i}_block.json'):
+        print(f'file already exists: json/{i}_block.json')
+    else:
+        upload_file_to_blob('btc-block-data',f'json/{i}_block.json',file_path)
 
 
 # Save block data in relational format to csv
@@ -143,14 +194,14 @@ def save_block_data_csv(block_height, block_data, output_dir):
 
 
 def start_main(output_dir):
-    start_height = 100000
+    start_height = 200000
     increment = 10
 
     # Iterate through blocks
     for i in range(start_height, start_height+increment):
         block_data = get_block_data(i)
         save_block_data_json(i, block_data, output_dir+'/json')
-        save_block_data_csv(i, block_data, output_dir+'/csv')
+        #save_block_data_csv(i, block_data, output_dir+'/csv')
 
 
 def __init__():
